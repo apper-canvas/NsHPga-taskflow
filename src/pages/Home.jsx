@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useSelector } from 'react-redux'
 import MainFeature from '../components/MainFeature'
 
 const Home = () => {
   const [isLoading, setIsLoading] = useState(true)
+  const { user } = useSelector((state) => state.user)
   
   useEffect(() => {
     // Simulate loading data
@@ -48,7 +50,7 @@ const Home = () => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
               >
-                Welcome to <span className="text-gradient">TaskFlow</span>
+                Welcome {user?.firstName ? `, ${user.firstName}` : ' to'} <span className="text-gradient">TaskFlow</span>
               </motion.h1>
               <motion.p 
                 className="text-surface-600 dark:text-surface-400 text-lg"

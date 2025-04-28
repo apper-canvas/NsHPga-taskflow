@@ -10,8 +10,10 @@ import {
   Edit, 
   X, 
   ChevronDown,
-  AlertCircle
+  AlertCircle,
+  Loader
 } from 'lucide-react'
+import { fetchTasks, createTask, updateTask, deleteTask } from '../services/taskService'
 
 // Priority options with their colors
 const PRIORITIES = {
@@ -29,9 +31,19 @@ const STATUSES = {
 
 const MainFeature = () => {
   // State for tasks
-  const [tasks, setTasks] = useState(() => {
-    const savedTasks = localStorage.getItem('tasks')
-    return savedTasks ? JSON.parse(savedTasks) : []
+  const [tasks, setTasks] = useState([])
+  
+  // State for loading
+  const [isLoading, setIsLoading] = useState(true)
+  
+  // State for error
+  const [error, setError] = useState(null)
+  
+  // State for operation status
+  const [operationStatus, setOperationStatus] = useState({
+    type: null, // 'success' or 'error'
+    message: '',
+    isVisible: false
   })
   
   // State for form
@@ -59,10 +71,38 @@ const MainFeature = () => {
   // State for dropdown
   const [dropdownOpen, setDropdownOpen] = useState(false)
   
-  // Save tasks to localStorage when they change
+  // Load tasks from server
   useEffect(() => {
-    localStorage.setItem('tasks', JSON.stringify(tasks))
-  }, [tasks])
+    const loadTasks = async () => {
+      try {
+        setIsLoading(true)
+        const loadedTasks = await fetchTasks()
+        setTasks(loadedTasks)
+        setError(null)
+      } catch (error) {
+        console.error('Error loading tasks:', error)
+        setError('Failed to load tasks. Please try again.')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    
+    loadTasks()
+  }, [])
+  
+  // Show operation status message
+  const showStatus = (type, message) => {
+    setOperationStatus({
+      type,
+      message,
+      isVisible: true
+    })
+    
+    // Hide after 3 seconds
+    setTimeout(() => {
+      setOperationStatus(prev => ({ ...prev, isVisible: false }))
+    }, 3000)
+  }
   
   // Handle form input changes
   const handleInputChange = (e) => {
@@ -92,38 +132,43 @@ const MainFeature = () => {
   }
   
   // Handle form submission
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     
     if (!validateForm()) return
     
-    if (editingTaskId) {
-      // Update existing task
-      setTasks(tasks.map(task => 
-        task.id === editingTaskId 
-          ? { ...task, ...formData, updatedAt: new Date().toISOString() }
-          : task
-      ))
-      setEditingTaskId(null)
-    } else {
-      // Add new task
-      const newTask = {
-        id: Date.now().toString(),
-        ...formData,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+    try {
+      setIsLoading(true)
+      
+      if (editingTaskId) {
+        // Update existing task
+        const updatedTask = await updateTask(editingTaskId, formData)
+        setTasks(tasks.map(task => 
+          task.id === editingTaskId ? updatedTask : task
+        ))
+        showStatus('success', 'Task updated successfully')
+        setEditingTaskId(null)
+      } else {
+        // Add new task
+        const newTask = await createTask(formData)
+        setTasks([newTask, ...tasks])
+        showStatus('success', 'Task created successfully')
       }
-      setTasks([...tasks, newTask])
+      
+      // Reset form
+      setFormData({
+        title: '',
+        description: '',
+        dueDate: '',
+        priority: 'medium',
+        status: 'pending'
+      })
+    } catch (error) {
+      console.error(error)
+      showStatus('error', `Failed to ${editingTaskId ? 'update' : 'create'} task. Please try again.`)
+    } finally {
+      setIsLoading(false)
     }
-    
-    // Reset form
-    setFormData({
-      title: '',
-      description: '',
-      dueDate: '',
-      priority: 'medium',
-      status: 'pending'
-    })
   }
   
   // Start editing a task
@@ -142,33 +187,56 @@ const MainFeature = () => {
   }
   
   // Delete a task
-  const handleDelete = (id) => {
-    setTasks(tasks.filter(task => task.id !== id))
-    
-    // If deleting the task being edited, clear edit mode
-    if (editingTaskId === id) {
-      setEditingTaskId(null)
-      setFormData({
-        title: '',
-        description: '',
-        dueDate: '',
-        priority: 'medium',
-        status: 'pending'
-      })
+  const handleDelete = async (id) => {
+    try {
+      setIsLoading(true)
+      await deleteTask(id)
+      setTasks(tasks.filter(task => task.id !== id))
+      showStatus('success', 'Task deleted successfully')
+      
+      // If deleting the task being edited, clear edit mode
+      if (editingTaskId === id) {
+        setEditingTaskId(null)
+        setFormData({
+          title: '',
+          description: '',
+          dueDate: '',
+          priority: 'medium',
+          status: 'pending'
+        })
+      }
+    } catch (error) {
+      console.error(error)
+      showStatus('error', 'Failed to delete task. Please try again.')
+    } finally {
+      setIsLoading(false)
     }
   }
   
   // Toggle task completion
-  const toggleTaskCompletion = (id) => {
-    setTasks(tasks.map(task => 
-      task.id === id 
-        ? { 
-            ...task, 
-            status: task.status === 'completed' ? 'pending' : 'completed',
-            updatedAt: new Date().toISOString()
-          }
-        : task
-    ))
+  const toggleTaskCompletion = async (id) => {
+    try {
+      const taskToUpdate = tasks.find(task => task.id === id)
+      if (!taskToUpdate) return
+      
+      const newStatus = taskToUpdate.status === 'completed' ? 'pending' : 'completed'
+      
+      setIsLoading(true)
+      const updatedTask = await updateTask(id, {
+        ...taskToUpdate,
+        status: newStatus
+      })
+      
+      setTasks(tasks.map(task => 
+        task.id === id ? updatedTask : task
+      ))
+      
+    } catch (error) {
+      console.error(error)
+      showStatus('error', 'Failed to update task status. Please try again.')
+    } finally {
+      setIsLoading(false)
+    }
   }
   
   // Cancel editing
@@ -216,7 +284,25 @@ const MainFeature = () => {
   }
   
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 relative">
+      {/* Operation Status Message */}
+      <AnimatePresence>
+        {operationStatus.isVisible && (
+          <motion.div 
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50 }}
+            className={`fixed top-20 right-4 z-50 p-4 rounded shadow-lg ${
+              operationStatus.type === 'success' 
+                ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100' 
+                : 'bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100'
+            }`}
+          >
+            {operationStatus.message}
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
       {/* Task Form */}
       <motion.div 
         id="task-form"
@@ -339,8 +425,14 @@ const MainFeature = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               className="btn btn-primary flex items-center gap-2"
+              disabled={isLoading}
             >
-              {editingTaskId ? (
+              {isLoading ? (
+                <>
+                  <Loader size={18} className="animate-spin" />
+                  {editingTaskId ? 'Updating...' : 'Adding...'}
+                </>
+              ) : editingTaskId ? (
                 <>
                   <Edit size={18} />
                   Update Task
@@ -360,6 +452,7 @@ const MainFeature = () => {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 className="btn btn-outline flex items-center gap-2"
+                disabled={isLoading}
               >
                 <X size={18} />
                 Cancel
@@ -446,14 +539,44 @@ const MainFeature = () => {
       >
         <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
           Your Tasks
-          {filteredTasks.length > 0 && (
+          {!isLoading && filteredTasks.length > 0 && (
             <span className="text-sm font-normal bg-surface-200 dark:bg-surface-700 text-surface-700 dark:text-surface-300 px-2 py-0.5 rounded-full">
               {filteredTasks.length}
             </span>
           )}
         </h2>
         
-        {filteredTasks.length === 0 ? (
+        {isLoading ? (
+          <div className="card p-8 text-center">
+            <div className="flex justify-center mb-4">
+              <div className="w-16 h-16 flex items-center justify-center">
+                <Loader size={32} className="animate-spin text-primary" />
+              </div>
+            </div>
+            <h3 className="text-lg font-medium mb-2">Loading your tasks...</h3>
+            <p className="text-surface-500 dark:text-surface-400">
+              This should only take a moment
+            </p>
+          </div>
+        ) : error ? (
+          <div className="card p-8 text-center text-red-500">
+            <div className="flex justify-center mb-4">
+              <div className="w-16 h-16 flex items-center justify-center">
+                <AlertCircle size={32} className="text-red-500" />
+              </div>
+            </div>
+            <h3 className="text-lg font-medium mb-2">Error loading tasks</h3>
+            <p className="text-surface-500 dark:text-surface-400">
+              {error}
+            </p>
+            <button 
+              onClick={() => window.location.reload()} 
+              className="mt-4 btn btn-primary"
+            >
+              Retry
+            </button>
+          </div>
+        ) : filteredTasks.length === 0 ? (
           <div className="card p-8 text-center">
             <div className="flex justify-center mb-4">
               <motion.div
@@ -537,7 +660,7 @@ const MainFeature = () => {
                           )}
                           <span className="flex items-center gap-1">
                             <Clock size={14} />
-                            {new Date(task.updatedAt).toLocaleDateString()}
+                            {formatDate(task.updatedAt)}
                           </span>
                         </div>
                         
